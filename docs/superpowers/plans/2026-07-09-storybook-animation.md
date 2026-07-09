@@ -18,6 +18,9 @@
 
 TDD 대상 아님 — 조작·검증 체크리스트. 각 항목의 결과(확정된 노드명/엔드포인트/경로)를 이 문서 하단 "Chunk 0 확정값" 표에 기록하고, Chunk 1~4는 그 값을 사용한다.
 
+> ⚠️ **Phase 0은 사람/머신 접근 필요:** ComfyUI ≥0.26 업데이트, ~37GB 모델 다운로드, Voicebox 풀빌드(Bun/Rust/Python/just)와 실서비스 검증은 자율 subagent가 무인으로 완주하기 어렵다. **자동 실행 시 이 청크는 사람이 수행하거나 감독**하고, 완료 후 "Chunk 0 확정값" 표를 채운다.
+> 🚧 **하드 게이트:** "Chunk 0 확정값" 표의 확정값 열이 비어 있으면 **Chunk 1의 빌더 코드/테스트를 작성하지 말 것** — 잠정값으로 green이 나면 스킵을 눈치채지 못한다.
+
 ### Task 0.1: 백업 & ComfyUI 업데이트 (≥0.26.0)
 
 - [ ] **Step 0.1.1: 현재 상태 스냅샷**
@@ -52,7 +55,8 @@ export const hfResolveUrl = (repo, filePath) =>
   `https://huggingface.co/${repo}/resolve/main/${filePath.split('/').map(encodeURIComponent).join('/')}`;
 
 export async function downloadTo(url, destPath, { minBytes = 0 } = {}) {
-  if (fs.existsSync(destPath) && fs.statSync(destPath).size >= minBytes && minBytes > 0) {
+  // 이미 받아둔 파일은 스킵(크기 기준이 있으면 그 이상일 때만). minBytes=0이면 존재만으로 스킵.
+  if (fs.existsSync(destPath) && fs.statSync(destPath).size >= minBytes) {
     return { skipped: true, destPath };
   }
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
@@ -149,6 +153,8 @@ git commit -m "feat: add model setup script and Phase 0 verified values"
 ---
 
 ## Chunk 1: 워크플로우 빌더 + 클라이언트 (Phase 1)
+
+> 🚧 **선행 게이트:** 시작 전 "Chunk 0 확정값" 표가 채워졌는지 확인. 비어 있으면 STOP하고 Chunk 0을 먼저 완료. 아래 상수·엔드포인트는 **확정값으로 교체**한 뒤 테스트와 함께 커밋.
 
 ### Task 1.1: Krea 2 삽화 빌더 (TDD)
 
@@ -261,27 +267,34 @@ test('buildWan22I2V: 필수값 누락 throw', () => {
 ```js
 import { muxArgs, concatArgs } from '../lib/compose.mjs';
 
-test('muxArgs: 오디오 있음 → 영상을 오디오 길이에 맞춤', () => {
+test('muxArgs: 영상이 오디오보다 짧음 → 패딩(tpad/loop)', () => {
   const args = muxArgs({ video: 'v.mp4', audio: 'a.wav', audioDur: 6, videoDur: 5, dest: 'o.mp4' });
   assert.ok(args.includes('v.mp4') && args.includes('a.wav') && args.includes('o.mp4'));
-  assert.ok(args.some((a) => /tpad|loop/.test(a))); // 영상이 짧으니 패딩
+  assert.ok(args.some((a) => /tpad|loop/.test(a)));
 });
 
-test('muxArgs: audio=none → 영상 그대로', () => {
+test('muxArgs: 영상이 오디오보다 김 → 트림', () => {
+  const args = muxArgs({ video: 'v.mp4', audio: 'a.wav', audioDur: 4, videoDur: 6, dest: 'o.mp4' });
+  // 오디오 길이로 자름: -t 4 또는 -shortest 등 트림 신호
+  assert.ok(args.some((a) => /-t|-shortest|trim/.test(a)));
+});
+
+test('muxArgs: audio=none → 영상 그대로(길이 변형 없음)', () => {
   const args = muxArgs({ video: 'v.mp4', audio: null, dest: 'o.mp4' });
   assert.ok(args.includes('v.mp4') && args.includes('o.mp4'));
-  assert.ok(!args.some((a) => a.endsWith('.wav')));
+  assert.ok(!args.some((a) => String(a).endsWith('.wav')));
+  assert.ok(!args.some((a) => /tpad|loop/.test(a)));
 });
 
-test('concatArgs: 클립 목록 → concat', () => {
+test('concatArgs: 모든 입력 클립이 인자에 포함 + dest', () => {
   const args = concatArgs(['a.clip.mp4', 'b.clip.mp4'], 'final.mp4');
-  assert.ok(args.includes('final.mp4'));
+  assert.ok(args.includes('a.clip.mp4') && args.includes('b.clip.mp4') && args.includes('final.mp4'));
 });
 ```
 
 - [ ] **Step 1.4.2: 실패 확인** → FAIL.
 
-- [ ] **Step 1.4.3: 구현** — `muxArgs`/`concatArgs`(순수, ffmpeg argv 배열 반환), `probeDuration(path)`(ffprobe 실행), `muxPageClip()`/`concatClips()`(spawn 실행). audio-authoritative/none 규칙(스펙 §compose).
+- [ ] **Step 1.4.3: 구현** — `muxArgs`/`concatArgs`(순수, ffmpeg argv 배열 반환), `probeDuration(path)`(ffprobe 실행), `muxPageClip()`/`concatClips()`(spawn 실행). audio-authoritative/none 규칙(스펙 §compose). **concat은 `filter_complex concat`으로 구현**(입력 파일들을 `-i`로 나열 → argv 순수 유지, list-file 부작용 없음). 트림은 `-t <audioDur>`, 패딩은 `tpad=stop_mode=clone`.
 
 - [ ] **Step 1.4.4: 통과 확인** → PASS.
 
@@ -291,44 +304,73 @@ test('concatArgs: 클립 목록 → concat', () => {
 
 ## Chunk 2: 오케스트레이터 + 서버 (Phase 2)
 
-### Task 2.1: storybook 오케스트레이터 (DI TDD)
+### Task 2.1: 기반 리팩터 — resolveSeed 추출 + comfy.freeMemory (오케스트레이터 선행)
+
+**Files:** Create: `lib/seed.mjs`; Modify: `server.mjs`, `lib/comfy.mjs`
+
+> 오케스트레이터가 `resolveSeed`·`freeMemory`를 import하므로 **Task 2.2보다 먼저** 존재해야 함.
+
+- [ ] **Step 2.1.1: `resolveSeed`를 `lib/seed.mjs`로 추출** — server.mjs의 `resolveSeed`를 `lib/seed.mjs`로 옮기고 export, server.mjs는 import로 교체(동작 불변).
+- [ ] **Step 2.1.2: `lib/comfy.mjs`에 `freeMemory({unloadModels=true, freeMemory=true})` 추가** — `POST /free` `{unload_models, free_memory}` 호출(Chunk 0 확정 형식).
+- [ ] **Step 2.1.3: 기존 테스트 회귀 확인** — Run: `npm test` → 전체 PASS.
+- [ ] **Step 2.1.4: Commit** — `git commit -m "refactor: extract resolveSeed to lib/seed, add comfy.freeMemory"`
+
+### Task 2.2: ComfyUI 페이지 러너 (전용 러너, B2)
+
+**Files:** Create: `lib/comfyrun.mjs`
+
+기존 `runJob`(server.mjs)은 단일 제출→`outputs/{job.id}.ext` 1개 출력에 하드코딩 → 재사용 불가. 워크플로우를 받아 **제출+WS 진행률+히스토리 폴링 완료판정+지정 경로로 다운로드**하는 러너를 분리.
+
+- [ ] **Step 2.2.1: `runComfyWorkflow(workflow, { destPath, onProgress })` 구현** — `comfy.submit`→`trackProgress`(onProgress)→히스토리 폴링(기존 완료판정 로직 재사용)→`extractOutputs` 첫 파일을 `comfy.downloadOutput(file, destPath)`로 저장. 반환 `{ destPath }`. 출력 명명은 호출측(오케스트레이터)이 `outputs/books/<id>/page-XX.png|mp4`로 지정.
+- [ ] **Step 2.2.2: 문법 확인** — `node --check lib/comfyrun.mjs`. (완료판정·다운로드는 Task 2.5 수직 슬라이스에서 실검증.)
+- [ ] **Step 2.2.3: Commit** — `git commit -m "feat: add dedicated ComfyUI workflow runner with output path"`
+
+### Task 2.3: storybook 오케스트레이터 (DI TDD)
 
 **Files:** Create: `lib/storybook.mjs`; Test: `test/storybook.test.mjs`
 
-핵심: comfy/voicebox/compose를 **주입(deps)**받아 순수 순차 로직을 테스트. deps = `{ generateIllustration, generateVideo, generateNarration, composeClip, uploadInput, freeMemory }`.
+comfy/voicebox/compose를 **주입(deps)**받아 순수 순차 로직 테스트. deps = `{ generateIllustration, generateVideo, generateNarration, composeClip, uploadInput, freeMemory }`.
 
-- [ ] **Step 2.1.1: 실패 테스트 작성 (소스 분기·의존성·에러 격리·freeMemory 순서)**
+- [ ] **Step 2.3.1: 실패 테스트 작성 (runPage: 소스 분기·의존성·hop·freeMemory 순서)**
 
 ```js
-import { runPage } from '../lib/storybook.mjs';
+import { runPage, runBook } from '../lib/storybook.mjs';
 
 function stubDeps(overrides = {}) {
   const calls = [];
-  const rec = (name) => async (...a) => { calls.push(name); return `${name}.out`; };
+  const rec = (name) => async () => { calls.push(name); return `${name}.out`; };
   return { calls, deps: {
     generateIllustration: rec('illu'), generateVideo: rec('vid'),
     generateNarration: rec('narr'), composeClip: rec('compose'),
-    uploadInput: (p) => { calls.push('upload'); return 'in.png'; },
+    uploadInput: () => { calls.push('upload'); return 'in.png'; },
     freeMemory: async () => { calls.push('free'); },
     ...overrides,
   } };
 }
 
-test('runPage: 모두 generate → 순서 illu→(free?)→upload→vid→free→narr→compose', async () => {
+test('runPage: 모두 generate → freeMemory가 내레이션 전에 호출, 삽화 input/ hop', async () => {
   const { calls, deps } = stubDeps();
   const page = { illustrationSource: 'generate', videoSource: 'generate', audioSource: 'generate', text: 't', seed: 1 };
   await runPage(page, { characterRef: 'c.png', bookDir: 'd' }, deps);
   assert.ok(calls.indexOf('free') < calls.indexOf('narr')); // Voicebox 전 VRAM 해제
-  assert.ok(calls.includes('upload')); // 삽화 PNG를 input/으로
+  assert.ok(calls.includes('upload'));
 });
 
-test('runPage: 삽화 upload + 영상 generate → 업로드 삽화를 input/ hop', async () => {
+test('runPage: characterRef 있으면 캐릭터 레퍼런스도 input/ hop', async () => {
+  const uploads = [];
+  const { deps } = stubDeps({ uploadInput: (p) => { uploads.push(p); return 'in.png'; } });
+  const page = { illustrationSource: 'generate', videoSource: 'generate', audioSource: 'none', text: 't', seed: 1 };
+  await runPage(page, { characterRef: 'c.png', bookDir: 'd' }, deps);
+  assert.ok(uploads.some((p) => String(p).includes('c.png'))); // 캐릭터 레퍼런스 hop
+});
+
+test('runPage: 삽화 upload + 영상 generate → 업로드 삽화 hop, 생성 안 함, audio none', async () => {
   const { calls, deps } = stubDeps();
   const page = { illustrationSource: 'upload', illustrationFile: 'u.png', videoSource: 'generate', audioSource: 'none', seed: 1 };
   await runPage(page, { bookDir: 'd' }, deps);
-  assert.ok(!calls.includes('illu')); // 생성 안 함
+  assert.ok(!calls.includes('illu'));
   assert.ok(calls.includes('upload') && calls.includes('vid'));
-  assert.ok(!calls.includes('narr')); // audio none
+  assert.ok(!calls.includes('narr'));
 });
 
 test('runPage: 영상 generate인데 삽화 없음 → throw', async () => {
@@ -338,34 +380,60 @@ test('runPage: 영상 generate인데 삽화 없음 → throw', async () => {
 });
 ```
 
-- [ ] **Step 2.1.2: 실패 확인** → FAIL.
+- [ ] **Step 2.3.2: 실패 확인** → FAIL.
 
-- [ ] **Step 2.1.3: `runPage` + `runBook` 구현** — 소스 분기, 의존성 검증(영상 generate엔 삽화 필수), freeMemory를 ComfyUI 단계 후·Voicebox 전 호출, 상태 전이, 페이지 에러 격리. `writeBooks()` 헬퍼(read-modify-write). seed는 호출 전 `resolveSeed`(공유).
+- [ ] **Step 2.3.3: `runPage` 구현** — 소스 분기, 의존성 검증(영상 generate엔 삽화 필수), 캐릭터 레퍼런스+삽화 PNG `uploadInput` hop, freeMemory를 ComfyUI 단계 후·Voicebox 전 호출, 페이지 상태 전이. seed는 호출 전 확정(`resolveSeed`).
 
-- [ ] **Step 2.1.4: 통과 확인** → PASS.
+- [ ] **Step 2.3.4: 통과 확인** → PASS.
 
-- [ ] **Step 2.1.5: Commit** — `git commit -m "feat: add storybook orchestrator with DI unit tests"`
+- [ ] **Step 2.3.5: 실패 테스트 작성 (runBook: 에러 격리·상태 전이, B1)**
 
-### Task 2.2: resolveSeed 공유 + comfy.freeMemory 추가
+```js
+test('runBook: 한 페이지 실패해도 book 계속, 실패 페이지 error 표기, 이후 페이지 실행', async () => {
+  const ran = [];
+  const deps = {
+    ...stubDeps().deps,
+    // 2번째 페이지의 삽화에서만 throw
+    generateIllustration: async (page) => { ran.push(page.id); if (page.id === 'p2') throw new Error('boom'); return 'illu.out'; },
+  };
+  const book = { id: 'b', pages: [
+    { id: 'p1', illustrationSource: 'generate', videoSource: 'generate', audioSource: 'none', seed: 1 },
+    { id: 'p2', illustrationSource: 'generate', videoSource: 'generate', audioSource: 'none', seed: 2 },
+    { id: 'p3', illustrationSource: 'generate', videoSource: 'generate', audioSource: 'none', seed: 3 },
+  ] };
+  const persisted = [];
+  await runBook(book, { persist: (b) => persisted.push(JSON.parse(JSON.stringify(b))) }, deps);
+  assert.deepEqual(ran, ['p1', 'p2', 'p3']); // 실패 후에도 p3 실행
+  assert.equal(book.pages[0].status, 'done');
+  assert.equal(book.pages[1].status, 'error');
+  assert.match(book.pages[1].error, /boom/);
+  assert.equal(book.pages[2].status, 'done');
+});
+```
 
-**Files:** Modify: `server.mjs`(resolveSeed export 또는 `lib/`로 추출), `lib/comfy.mjs`
+- [ ] **Step 2.3.6: 실패 확인** → FAIL.
 
-- [ ] **Step 2.2.1: `resolveSeed`를 `lib/seed.mjs`로 추출** 후 server.mjs/storybook.mjs가 import. (기존 동작 불변.)
-- [ ] **Step 2.2.2: `lib/comfy.mjs`에 `freeMemory({unloadModels=true, freeMemory=true})` 추가** — `POST /free` 호출.
-- [ ] **Step 2.2.3: 기존 테스트 회귀 확인** — Run: `npm test` → 전체 PASS.
-- [ ] **Step 2.2.4: Commit** — `git commit -m "refactor: share resolveSeed, add comfy.freeMemory"`
+- [ ] **Step 2.3.7: `runBook` 구현** — 페이지 순차 실행, 각 페이지 `try/catch`로 격리(실패 시 `status='error'`, `error` 기록, 다음 페이지 계속), 단계마다 `persist` 콜백. 전 페이지 성공 시 `concatClips`로 `final.mp4`(실패 페이지 있으면 정책상 부분 concat 또는 스킵 — 스킵으로 구현하고 book status='error').
 
-### Task 2.3: 서버 라우트 (book CRUD + 생성 + 진행률)
+- [ ] **Step 2.3.8: 통과 확인** → PASS.
+
+- [ ] **Step 2.3.9: Commit** — `git commit -m "feat: add storybook orchestrator (runPage/runBook) with DI tests"`
+
+### Task 2.4: 서버 라우트 — book CRUD + 업로드
 
 **Files:** Modify: `server.mjs`
 
-- [ ] **Step 2.3.1: book 저장소 + 라우트 구현** — `data/books.json`(`readBooks`/`writeBooks`), 라우트: `GET/POST /api/books`, `GET/PUT/DELETE /api/books/:id`, `POST /api/books/:id/character`, `POST /api/books/:id/pages/:pid/upload`(→`outputs/books/<id>/`, 타입·크기 검증, 영상 ~500MB), `POST /api/books/:id/pages/:pid/generate`, `POST /api/books/:id/generate`, `GET /api/books/:id/progress`, `GET /api/storybook/status`(comfy/voicebox/ffmpeg 도달·모델 설치), `POST /api/voicebox/start`. 생성은 오케스트레이터를 백그라운드 구동, 진행 상태를 인메모리 book-job으로 노출.
+- [ ] **Step 2.4.1: book 저장소 + CRUD/업로드 라우트** — `data/books.json`(`readBooks`/`writeBooks`), 라우트: `GET/POST /api/books`, `GET/PUT/DELETE /api/books/:id`, `POST /api/books/:id/character`(→`outputs/books/<id>/char.*`), `POST /api/books/:id/pages/:pid/upload`(`kind`=illustration|video|audio → `outputs/books/<id>/`, 타입·크기 검증: 이미지/오디오 ~20MB, 영상 ~500MB, 소스 필드 갱신), `GET /api/storybook/status`(comfy/voicebox/ffmpeg 도달·모델 설치 여부), `POST /api/voicebox/start`.
+- [ ] **Step 2.4.2: 서버 기동 스모크** — `node --check server.mjs` 후 기동, `curl /api/storybook/status`가 각 서비스 false로 응답, `/api/books` `[]`, book 생성·조회 동작.
+- [ ] **Step 2.4.3: Commit** — `git commit -m "feat: add book CRUD and asset upload routes"`
 
-- [ ] **Step 2.3.2: 서버 기동 스모크(서비스 미기동 상태)** — `node --check server.mjs` 후 기동, `curl /api/storybook/status`가 각 서비스 false로 응답, `/api/books` `[]`.
+### Task 2.5: 서버 라우트 — 생성/진행률 + 수직 슬라이스 E2E
 
-- [ ] **Step 2.3.3: 1페이지 수직 슬라이스 E2E(실서비스)** — ComfyUI+Voicebox 기동 상태에서 book 1개·페이지 1개(모두 generate) 생성 → 삽화·영상·내레이션·합성·`page-01.clip.mp4` 확인, `books.json` 기록.
+**Files:** Modify: `server.mjs`
 
-- [ ] **Step 2.3.4: Commit** — `git commit -m "feat: add storybook server routes and vertical-slice E2E"`
+- [ ] **Step 2.5.1: 생성·진행률 라우트** — `POST /api/books/:id/pages/:pid/generate`, `POST /api/books/:id/generate`(오케스트레이터 `runBook`을 `lib/comfyrun.mjs` 러너·voicebox·compose deps로 백그라운드 구동), `GET /api/books/:id/progress`(스펙 진행률 shape: `{ bookId, currentPageIndex, totalPages, currentStage, stageProgress, perPageStatus[] }`, 인메모리 book-job에서 노출).
+- [ ] **Step 2.5.2: 1페이지 수직 슬라이스 E2E(실서비스)** — ComfyUI+Voicebox 기동 상태에서 book 1개·페이지 1개(모두 generate) 생성 → 삽화·영상·내레이션·합성·`page-01.clip.mp4` 생성 확인, `books.json` 기록, `/progress` 폴링 동작. **여기서 `lib/comfyrun.mjs` 완료판정·다운로드가 실검증됨.**
+- [ ] **Step 2.5.3: Commit** — `git commit -m "feat: add generate/progress routes and vertical-slice E2E"`
 
 ---
 
