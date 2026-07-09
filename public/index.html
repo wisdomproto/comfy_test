@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ComfyUI 테스트벤치</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>ComfyUI 테스트벤치</h1>
+  <div id="comfy-status" class="status offline">
+    <span id="status-text">확인 중…</span>
+    <button id="btn-start-comfy" hidden>ComfyUI 시작</button>
+  </div>
+</header>
+
+<div id="active-jobs"></div>
+
+<nav>
+  <button class="tab active" data-tab="image">이미지 생성</button>
+  <button class="tab" data-tab="video">영상 생성</button>
+  <button class="tab" data-tab="history">히스토리</button>
+</nav>
+
+<main>
+<section id="tab-image" class="panel active">
+  <form id="form-image">
+    <label>프롬프트
+      <textarea name="prompt" rows="3" required placeholder="a cozy cabin in the woods, warm light"></textarea>
+    </label>
+    <details><summary>Negative 프롬프트 (FLUX는 보통 불필요)</summary>
+      <textarea name="negative" rows="2"></textarea>
+    </details>
+    <div class="row">
+      <label>LoRA
+        <select name="lora"><option value="">(없음)</option></select>
+      </label>
+      <label>LoRA 강도 <input type="number" name="loraStrength" value="1.0" step="0.1" min="0" max="3"></label>
+    </div>
+    <p id="lora-hint" class="hint" hidden></p>
+    <div class="row">
+      <label>사이즈
+        <select name="size">
+          <option value="1024x1024">1:1 (1024×1024)</option>
+          <option value="1344x768">16:9 (1344×768)</option>
+          <option value="768x1344">9:16 (768×1344)</option>
+        </select>
+      </label>
+      <label>Steps <input type="number" name="steps" value="25" min="1" max="50"></label>
+      <label>Guidance <input type="number" name="guidance" value="3.5" step="0.5" min="1" max="10"></label>
+    </div>
+    <div class="row">
+      <label>Seed <input type="number" name="seed" value="42" min="0"></label>
+      <label class="check"><input type="checkbox" name="randomSeed" checked> 랜덤</label>
+    </div>
+    <button type="submit" class="primary">이미지 생성</button>
+  </form>
+  <div id="image-result" class="result"></div>
+</section>
+
+<section id="tab-video" class="panel">
+  <form id="form-video">
+    <fieldset>
+      <legend>소스 이미지</legend>
+      <label class="check"><input type="radio" name="sourceType" value="history" checked> 히스토리에서 선택</label>
+      <label class="check"><input type="radio" name="sourceType" value="upload"> 파일 업로드</label>
+      <div id="video-source-history" class="thumb-grid small"></div>
+      <input type="file" id="video-source-file" accept="image/*" hidden>
+      <p id="video-source-selected" class="hint">선택된 소스 없음</p>
+    </fieldset>
+    <label>모션 프롬프트
+      <textarea name="motionPrompt" rows="2" required>subtle natural motion, gentle wind, soft camera movement, cinematic</textarea>
+    </label>
+    <div class="row">
+      <label>길이
+        <select name="frames">
+          <option value="81">5초 (81프레임)</option>
+          <option value="161">10초 (161프레임)</option>
+        </select>
+      </label>
+      <label>Steps <input type="number" name="steps" value="25" min="10" max="40"></label>
+      <label>Seed <input type="number" name="seed" value="42" min="0"></label>
+      <label class="check"><input type="checkbox" name="randomSeed" checked> 랜덤</label>
+    </div>
+    <p class="hint">⏱ fp8 모델 기준 5초 클립에 ~22분 소요됩니다. 브라우저를 닫아도 서버가 완료합니다.</p>
+    <button type="submit" class="primary">영상 생성</button>
+  </form>
+  <div id="video-result" class="result"></div>
+</section>
+
+<section id="tab-history" class="panel">
+  <div id="history-grid" class="cards"></div>
+</section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
