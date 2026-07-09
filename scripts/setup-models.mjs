@@ -11,10 +11,11 @@ const COMFY_ROOT = 'C:\\ComfyUI_windows_portable\\ComfyUI';
 const dest = (folder, file) => path.join(COMFY_ROOT, 'models', folder, path.basename(file));
 
 const MANIFEST = [
-  { repo: 'Comfy-Org/Krea-2', file: 'krea2_turbo_fp8_scaled.safetensors', folder: 'diffusion_models' },
-  { repo: 'Comfy-Org/Krea-2', file: 'qwen3vl_4b_fp8_scaled.safetensors', folder: 'text_encoders' },
-  { repo: 'Comfy-Org/Krea-2', file: 'qwen_image_vae.safetensors', folder: 'vae' },
-  { repo: 'Comfy-Org/Krea-2', file: 'krea2_kidsdrawing.safetensors', folder: 'loras' },
+  // Comfy-Org/Krea-2는 파일이 하위 폴더(diffusion_models/ 등)에 위치 — 레포 내 경로에 접두어 필요 (HF 실검증)
+  { repo: 'Comfy-Org/Krea-2', file: 'diffusion_models/krea2_turbo_fp8_scaled.safetensors', folder: 'diffusion_models' },
+  { repo: 'Comfy-Org/Krea-2', file: 'text_encoders/qwen3vl_4b_fp8_scaled.safetensors', folder: 'text_encoders' },
+  { repo: 'Comfy-Org/Krea-2', file: 'vae/qwen_image_vae.safetensors', folder: 'vae' },
+  { repo: 'Comfy-Org/Krea-2', file: 'loras/krea2_kidsdrawing.safetensors', folder: 'loras' },
   { repo: 'conradlocke/krea2-identity-edit', file: 'krea2_identity_edit_v1.safetensors', folder: 'loras' },
   { repo: 'Comfy-Org/Wan_2.2_ComfyUI_Repackaged', file: 'split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors', folder: 'diffusion_models' },
   { repo: 'Comfy-Org/Wan_2.2_ComfyUI_Repackaged', file: 'split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors', folder: 'text_encoders' },
