@@ -473,18 +473,20 @@ test('runBook: 전 페이지 성공 → concatClips로 final.mp4, book done', as
 
 ## Chunk 0 확정값 (Phase 0에서 채움)
 
-| 항목 | 잠정값 | 확정값(실검증) |
+| 항목 | 잠정값 | 확정값(실검증 2026-07-09) |
 |---|---|---|
-| ComfyUI 버전 | ≥0.26.0 | |
-| Krea2 unet 파일명 | krea2_turbo_fp8_scaled.safetensors | |
-| Krea2 text encoder | qwen3vl_4b_fp8_scaled.safetensors | |
-| Krea2 vae | qwen_image_vae.safetensors | |
-| Krea2Edit 노드명/배선 | Krea2EditModelPatch, Krea2EditGroundedEncode | |
-| Wan2.2 unet | wan2.2_ti2v_5B_fp16.safetensors | |
-| Wan2.2 vae | wan2.2_vae.safetensors | |
-| Voicebox base | http://127.0.0.1:17493 | |
-| Voicebox 프로필 생성 | POST /profiles → POST /profiles/{id}/samples | |
-| Voicebox 생성 | POST /generate/stream (WAV) | |
-| 한국어 설정 | engine=qwen, language=ko, model_size=1.7B | |
-| ffmpeg/ffprobe 경로 | PATH | |
-| ComfyUI free | POST /free {unload_models,free_memory} | |
+| ComfyUI 버전 | ≥0.26.0 | **0.27.0** ✓ (0.19.3→업데이트 완료, 기존 노드 회귀 OK) |
+| Krea2 unet | krea2_turbo_fp8_scaled | **`diffusion_models/krea2_turbo_fp8_scaled.safetensors`** (HF repo `Comfy-Org/Krea-2`, 하위폴더!) |
+| Krea2 text encoder | qwen3vl_4b_fp8_scaled | **`text_encoders/qwen3vl_4b_fp8_scaled.safetensors`**, CLIPLoader **type=`krea2`** |
+| Krea2 vae | qwen_image_vae | **`vae/qwen_image_vae.safetensors`** |
+| Krea2 style LoRA | krea2_kidsdrawing | **`loras/krea2_kidsdrawing.safetensors`** (LoraLoaderModelOnly) |
+| Krea2 t2i 샘플러 | — | **KSampler steps=8, cfg=1, euler, simple, denoise=1**; 음성=**ConditioningZeroOut**; **EmptyLatentImage** |
+| Krea2Edit 노드/배선 | Krea2EditModelPatch, Krea2EditGroundedEncode | **`Krea2EditModelPatch(model, source_latent)`→MODEL** (ref를 VAEEncode한 latent); **`Krea2EditGroundedEncode(clip, prompt, image, grounding_px=768)`→CONDITIONING** (CLIPTextEncode 대체); 노드 로드 확인 필요(다운로드 후 재기동) |
+| Wan2.2 unet | wan2.2_ti2v_5B_fp16 | `Comfy-Org/Wan_2.2_ComfyUI_Repackaged/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors` (다운로드 중) |
+| Wan2.2 vae | wan2.2_vae | `split_files/vae/wan2.2_vae.safetensors` (다운로드 중) |
+| Voicebox base | http://127.0.0.1:17493 | 설치 중(Python **3.12** 필수 — 3.13은 kokoro 비호환), `/docs`로 계약 검증 예정 |
+| Voicebox 프로필 생성 | POST /profiles → POST /profiles/{id}/samples | 검증 예정 |
+| Voicebox 생성 | POST /generate/stream (WAV) | 검증 예정 |
+| 한국어 설정 | engine=qwen, language=ko, model_size=1.7B | 검증 예정 |
+| ffmpeg/ffprobe 경로 | PATH | 확인 예정 |
+| ComfyUI free | POST /free {unload_models,free_memory} | **200 OK** ✓ |
