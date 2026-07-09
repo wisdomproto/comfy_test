@@ -329,7 +329,7 @@ test('concatArgs: 모든 입력 클립이 인자에 포함 + dest', () => {
 
 **Files:** Create: `lib/storybook.mjs`; Test: `test/storybook.test.mjs`
 
-comfy/voicebox/compose를 **주입(deps)**받아 순수 순차 로직 테스트. deps = `{ generateIllustration, generateVideo, generateNarration, composeClip, uploadInput, freeMemory }`.
+comfy/voicebox/compose를 **주입(deps)**받아 순수 순차 로직 테스트. deps = `{ generateIllustration, generateVideo, generateNarration, composeClip, concatClips, uploadInput, freeMemory }`. (`concatClips`도 주입 — DI 순수성 유지.)
 
 - [ ] **Step 2.3.1: 실패 테스트 작성 (runPage: 소스 분기·의존성·hop·freeMemory 순서)**
 
@@ -342,6 +342,7 @@ function stubDeps(overrides = {}) {
   return { calls, deps: {
     generateIllustration: rec('illu'), generateVideo: rec('vid'),
     generateNarration: rec('narr'), composeClip: rec('compose'),
+    concatClips: rec('concat'),
     uploadInput: () => { calls.push('upload'); return 'in.png'; },
     freeMemory: async () => { calls.push('free'); },
     ...overrides,
@@ -409,11 +410,22 @@ test('runBook: 한 페이지 실패해도 book 계속, 실패 페이지 error �
   assert.match(book.pages[1].error, /boom/);
   assert.equal(book.pages[2].status, 'done');
 });
+
+test('runBook: 전 페이지 성공 → concatClips로 final.mp4, book done', async () => {
+  const { calls, deps } = stubDeps();
+  const book = { id: 'b', pages: [
+    { id: 'p1', illustrationSource: 'generate', videoSource: 'generate', audioSource: 'none', seed: 1 },
+    { id: 'p2', illustrationSource: 'generate', videoSource: 'generate', audioSource: 'none', seed: 2 },
+  ] };
+  await runBook(book, { persist: () => {} }, deps);
+  assert.ok(calls.includes('concat')); // 전 페이지 성공 시 concat 호출
+  assert.equal(book.status, 'done');
+});
 ```
 
 - [ ] **Step 2.3.6: 실패 확인** → FAIL.
 
-- [ ] **Step 2.3.7: `runBook` 구현** — 페이지 순차 실행, 각 페이지 `try/catch`로 격리(실패 시 `status='error'`, `error` 기록, 다음 페이지 계속), 단계마다 `persist` 콜백. 전 페이지 성공 시 `concatClips`로 `final.mp4`(실패 페이지 있으면 정책상 부분 concat 또는 스킵 — 스킵으로 구현하고 book status='error').
+- [ ] **Step 2.3.7: `runBook` 구현** — 페이지 순차 실행, 각 페이지 `try/catch`로 격리(실패 시 `status='error'`, `error` 기록, 다음 페이지 계속), 단계마다 `persist` 콜백. **전 페이지 성공 시 주입된 `concatClips`로 `final.mp4` 생성하고 book `status='done'`**; 실패 페이지가 있으면 concat 스킵하고 book `status='error'`.
 
 - [ ] **Step 2.3.8: 통과 확인** → PASS.
 
