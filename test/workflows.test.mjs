@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFluxT2I, buildWanI2V, buildKrea2Illustration, LORA_TRIGGERS, WAN_NEGATIVE } from '../lib/workflows.mjs';
+import { buildFluxT2I, buildWanI2V, buildWan22I2V, buildKrea2Illustration, LORA_TRIGGERS, WAN_NEGATIVE } from '../lib/workflows.mjs';
 
 const nodeByType = (g, t) => Object.values(g).find((n) => n.class_type === t);
 const idByType = (g, t) => Object.keys(g).find((id) => g[id].class_type === t);
@@ -61,6 +61,48 @@ test('buildWanI2V: 필수값 누락 시 throw', () => {
   assert.throws(() => buildWanI2V({ motionPrompt: 'x', seed: 1 }), /imageName/);
   assert.throws(() => buildWanI2V({ imageName: 'a.png', seed: 1 }), /motionPrompt/);
   assert.throws(() => buildWanI2V({ imageName: 'a.png', motionPrompt: 'x' }), /seed/);
+});
+
+test('buildWan22I2V: 기본값으로 완전한 그래프 생성', () => {
+  const g = buildWan22I2V({ imageName: 'hero.png', motionPrompt: 'slow zoom in', seed: 11 });
+  const unet = nodeByType(g, 'UNETLoader');
+  assert.equal(unet.inputs.unet_name, 'wan2.2_ti2v_5B_fp16.safetensors');
+  assert.equal(unet.inputs.weight_dtype, 'default');
+  const shift = nodeByType(g, 'ModelSamplingSD3');
+  assert.ok(shift);
+  assert.equal(shift.inputs.shift, 8);
+  const clip = nodeByType(g, 'CLIPLoader');
+  assert.equal(clip.inputs.clip_name, 'umt5_xxl_fp8_e4m3fn_scaled.safetensors');
+  assert.equal(clip.inputs.type, 'wan');
+  const vae = nodeByType(g, 'VAELoader');
+  assert.equal(vae.inputs.vae_name, 'wan2.2_vae.safetensors');
+  const load = nodeByType(g, 'LoadImage');
+  assert.equal(load.inputs.image, 'hero.png');
+  const latent = nodeByType(g, 'Wan22ImageToVideoLatent');
+  assert.equal(latent.inputs.length, 121);
+  assert.equal(latent.inputs.width, 1280);
+  assert.equal(latent.inputs.height, 704);
+  const ks = nodeByType(g, 'KSampler');
+  assert.equal(ks.inputs.steps, 20);
+  assert.equal(ks.inputs.cfg, 5);
+  assert.equal(ks.inputs.sampler_name, 'uni_pc');
+  assert.equal(ks.inputs.scheduler, 'simple');
+  assert.equal(ks.inputs.seed, 11);
+  // KSampler 모델 입력이 ModelSamplingSD3를 가리켜야 함
+  const shiftId = idByType(g, 'ModelSamplingSD3');
+  assert.equal(ks.inputs.model[0], shiftId);
+  assert.equal(nodeByType(g, 'CreateVideo').inputs.fps, 24);
+  assert.ok(nodeByType(g, 'SaveVideo'));
+  // 기본 네거티브는 WAN_NEGATIVE
+  const neg = Object.values(g).filter((n) => n.class_type === 'CLIPTextEncode')
+    .find((n) => n.inputs.text === WAN_NEGATIVE);
+  assert.ok(neg);
+});
+
+test('buildWan22I2V: 필수값 누락 시 throw', () => {
+  assert.throws(() => buildWan22I2V({ motionPrompt: 'x', seed: 1 }), /imageName/);
+  assert.throws(() => buildWan22I2V({ imageName: 'a.png', seed: 1 }), /motionPrompt/);
+  assert.throws(() => buildWan22I2V({ imageName: 'a.png', motionPrompt: 'x' }), /seed/);
 });
 
 test('buildKrea2Illustration: 기본값 base 그래프 (캐릭터 참조 없음)', () => {
