@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-09-storybook-animation-design.md`
 
+> **진행 상태 (2026-07-09):** 핵심 파이프라인 실검증·구현 완료 — 단, 영상은 계획의 5B가 아니라 **Wan 2.2 14B GGUF+lightx2v+RealESRGAN 업스케일 5초 N컷 체이닝**으로, 내레이션은 **음성 복제(engine=qwen)**로 확정(스펙 어드덴덤 참조). 재사용 모듈(`buildWan22I2V14B`, `lib/pagevideo.mjs`, `lib/voicebox.mjs`, `lib/comfyrun.mjs`, `lib/compose.mjs`) + 한-커맨드 CLI `scripts/make-page.mjs` 완료, 테스트 29개 통과. **미완: 웹앱 UI 통합**(server 라우트 + 동화책 탭으로 오케스트레이터 재배선), 호리 캐릭터 LoRA.
+
 **전제:** ComfyUI `C:\ComfyUI_windows_portable`(RTX 4070 12GB). 스펙의 Krea2Edit 노드명·Voicebox REST 계약은 **잠정값** — Chunk 0에서 실검증 후 Chunk 1 코드에 확정 반영.
 
 ---

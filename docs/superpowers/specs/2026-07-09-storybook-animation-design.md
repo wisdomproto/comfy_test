@@ -1,7 +1,16 @@
 # 동화책 애니메이션 생성기 Design (comfy_test 확장)
 
 **작성일:** 2026-07-09
-**상태:** 설계 승인됨 → 스펙 리뷰 대기
+**상태:** 설계 승인됨 → **일부 실검증으로 갱신**(아래 어드덴덤)
+
+## 어드덴덤 — 실검증 반영 (2026-07-09)
+실기 검증으로 아래 결정이 변경/확정됨 (자세히는 memory `storybook-pipeline-validated.md`):
+- **영상: Wan 2.2 5B → 14B GGUF(Q4_K_M, two-expert)+lightx2v 4-step.** 5B는 품질 낮음(캐릭터 몰핑). 커스텀노드 `ComfyUI-GGUF` 필요.
+- **해상도: 480p 생성 + 워크플로우 내 RealESRGAN 업스케일**(1080=4x→1872×1080). 네이티브 720p보다 빠르고 해상도 큼.
+- **긴 영상: 5초 N컷 체이닝**(마지막 프레임→다음 시작). Wan 단발 15초는 품질저하/OOM.
+- **내레이션: Krea2Edit/프리셋이 아니라 음성 복제(engine=qwen)** — 참조 오디오로 원하는 목소리. Sohee 프리셋은 톤 우울+instruct 안 먹힘.
+- **캐릭터 일관성: Krea2Edit는 새 장면 생성엔 부적합(구도 복제)** → 시리즈는 Krea2 LoRA 학습 필요(보류).
+- **구현: 재사용 모듈**(`buildWan22I2V14B`, `lib/pagevideo.mjs`, `lib/voicebox.mjs`, `scripts/make-page.mjs`) 완료. 웹앱 UI 통합은 미완.
 
 ## 목표
 
