@@ -1,0 +1,16 @@
+{
+  "startImage": "C:/Users/101024/Downloads/p1.png",
+  "cuts": [
+    "the mother tiger gently sets the plate down on the table and gives a warm loving smile, soft steam rising from the food, cozy warm kitchen at sunset, very gentle subtle motion, slow soft camera push-in",
+    "the little tiger cub looks at the colorful dishes on the table with big curious eyes, a small head turn, warm steam drifting softly, a gentle blink, calm cozy gentle motion",
+    "the little tiger cub picks up a meatball with the chopsticks and happily takes a small bite, soft cheek chewing movement, ignoring the vegetables, cozy warm kitchen, gentle motion"
+  ],
+  "narrationText": "골고루 냠냠, 무지개 힘이 쑥쑥! 저녁이 되면 호리네 식탁엔 이런 노래가 흐르곤 해요. 오늘 저녁도 알록달록, 색깔이 참 많아요. 그런데 호리는 노래엔 관심 없이 하얀 밥이랑 고기만 콕콕 집어요.",
+  "voice": {
+    "name": "narrator_clone_ko",
+    "refAudioPath": "C:/Users/101024/Downloads/나레이션.mp3",
+    "refText": "옛날 어느 마을에 마음씨 착한 구둣방 할아버지와 할머니가 살았어요. \"에휴, 이제 가죽이 딱 한 켤레 만들 것밖에 남지 않았구려.\""
+  },
+  "dest": "C:/Users/101024/Downloads/hori_page1.mp4",
+  "upscale": "1080"
+}
