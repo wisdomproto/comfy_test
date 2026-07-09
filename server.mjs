@@ -2,10 +2,11 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import express from 'express';
 import busboy from 'busboy';
 import * as comfy from './lib/comfy.mjs';
+import * as voicebox from './lib/voicebox.mjs';
 import { buildFluxT2I, buildWanI2V, LORA_TRIGGERS } from './lib/workflows.mjs';
 import { resolveSeed } from './lib/seed.mjs';
 
@@ -25,6 +26,16 @@ function appendRun(run) {
   runs.push(run);
   fs.writeFileSync(RUNS_FILE, JSON.stringify(runs, null, 2));
 }
+
+// 스토리북("book") 저장소 — runs.json과 동일한 JSON 파일 패턴
+const BOOKS_FILE = path.join(DATA_DIR, 'books.json');
+if (!fs.existsSync(BOOKS_FILE)) fs.writeFileSync(BOOKS_FILE, '[]');
+const readBooks = () => JSON.parse(fs.readFileSync(BOOKS_FILE, 'utf8'));
+function writeBooks(books) {
+  fs.writeFileSync(BOOKS_FILE, JSON.stringify(books, null, 2));
+}
+// 북 에셋 디렉터리 — outputs/ 아래라 express.static으로 웹 서빙됨
+const bookDir = (id) => path.join(OUTPUTS_DIR, 'books', id);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -210,5 +221,209 @@ app.get('/api/jobs/:id', (req, res) => {
   res.json(job);
 });
 app.get('/api/runs', (req, res) => res.json(readRuns().reverse()));
+
+// ── 스토리북(book) CRUD + 에셋 업로드 ────────────────────────────────
+
+// PUT에서 페이지 정규화: id 보장 + source/status/file 기본값 채움 (기존 값은 보존)
+function normalizePage(p) {
+  return {
+    ...p,
+    id: p.id ?? crypto.randomUUID(),
+    illustrationSource: p.illustrationSource ?? 'generate',
+    videoSource: p.videoSource ?? 'generate',
+    audioSource: p.audioSource ?? 'generate',
+    status: p.status ?? 'draft',
+    illustrationFile: p.illustrationFile ?? null,
+    videoFile: p.videoFile ?? null,
+    audioFile: p.audioFile ?? null,
+    clipFile: p.clipFile ?? null,
+    error: p.error ?? null,
+  };
+}
+
+app.get('/api/books', (req, res) => res.json(readBooks()));
+
+app.post('/api/books', (req, res) => {
+  const book = {
+    id: crypto.randomUUID(),
+    title: req.body.title ?? 'Untitled',
+    characterRef: null,
+    style: req.body.style ?? null,
+    createdAt: new Date().toISOString(),
+    pages: [],
+    status: 'draft',
+  };
+  fs.mkdirSync(bookDir(book.id), { recursive: true });
+  const books = readBooks();
+  books.push(book);
+  writeBooks(books);
+  res.json(book);
+});
+
+app.get('/api/books/:id', (req, res) => {
+  const book = readBooks().find((b) => b.id === req.params.id);
+  if (!book) return res.status(404).json({ error: 'book not found' });
+  res.json(book);
+});
+
+app.put('/api/books/:id', (req, res) => {
+  const books = readBooks();
+  const book = books.find((b) => b.id === req.params.id);
+  if (!book) return res.status(404).json({ error: 'book not found' });
+  if (req.body.title !== undefined) book.title = req.body.title;
+  if (req.body.style !== undefined) book.style = req.body.style;
+  if (req.body.pages !== undefined) {
+    book.pages = (req.body.pages ?? []).map(normalizePage);
+  }
+  writeBooks(books);
+  res.json(book);
+});
+
+app.delete('/api/books/:id', (req, res) => {
+  const books = readBooks().filter((b) => b.id !== req.params.id);
+  writeBooks(books); // 파일은 그대로 둠 (best-effort)
+  res.json({ deleted: true });
+});
+
+// 캐릭터 레퍼런스 업로드 (multipart 단일 파일) — /api/upload와 동일 패턴
+app.post('/api/books/:id/character', (req, res) => {
+  const books = readBooks();
+  const book = books.find((b) => b.id === req.params.id);
+  if (!book) return res.status(404).json({ error: 'book not found' });
+  fs.mkdirSync(bookDir(book.id), { recursive: true });
+
+  const bb = busboy({ headers: req.headers, limits: { fileSize: 20 * 1024 * 1024 } });
+  let done = null;
+  let out = null;
+  bb.on('file', (name, file, info) => {
+    const ext = path.extname(info.filename) || '.png';
+    const destPath = path.join(bookDir(book.id), `char${ext}`);
+    out = fs.createWriteStream(destPath);
+    file.pipe(out);
+    done = new Promise((resolve, reject) => {
+      file.on('limit', () => {
+        out.destroy();
+        fs.rm(destPath, { force: true }, () => {});
+        reject(new Error('file too large'));
+      });
+      out.on('finish', () => resolve(`outputs/books/${book.id}/char${ext}`));
+      out.on('error', reject);
+    });
+    done.catch(() => {});
+  });
+  bb.on('close', async () => {
+    if (res.headersSent) return;
+    if (!done) return res.status(400).json({ error: 'no file' });
+    try {
+      const characterRef = await done;
+      book.characterRef = characterRef;
+      writeBooks(books);
+      res.json({ characterRef });
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      res.status(msg === 'file too large' ? 400 : 500).json({ error: msg });
+    }
+  });
+  bb.on('error', (err) => {
+    out?.destroy();
+    if (!res.headersSent) res.status(400).json({ error: String(err?.message ?? err) });
+  });
+  req.on('aborted', () => { out?.destroy(); bb.destroy(); });
+  req.pipe(bb);
+});
+
+// 페이지 에셋 업로드 (illustration|video|audio) — 스트리밍 중 바이트 카운트로 크기 제한
+const KIND_CAPS = { illustration: 20 * 1024 * 1024, audio: 20 * 1024 * 1024, video: 500 * 1024 * 1024 };
+app.post('/api/books/:id/pages/:pid/upload', (req, res) => {
+  const books = readBooks();
+  const book = books.find((b) => b.id === req.params.id);
+  if (!book) return res.status(404).json({ error: 'book not found' });
+  const page = book.pages.find((p) => p.id === req.params.pid);
+  if (!page) return res.status(404).json({ error: 'page not found' });
+  fs.mkdirSync(bookDir(book.id), { recursive: true });
+
+  let kind = req.query.kind; // 폼 필드가 없으면 쿼리에서
+  const bb = busboy({ headers: req.headers });
+  let done = null;
+  let out = null;
+  bb.on('field', (name, val) => { if (name === 'kind') kind = val; });
+  bb.on('file', (name, file, info) => {
+    if (!KIND_CAPS[kind]) { // 유효하지 않은 kind — 파일 폐기 후 400
+      file.resume();
+      done = Promise.reject(new Error('invalid kind'));
+      done.catch(() => {});
+      return;
+    }
+    const cap = KIND_CAPS[kind];
+    const ext = path.extname(info.filename) || '';
+    const fileName = `${req.params.pid}-${kind}${ext}`;
+    const destPath = path.join(bookDir(book.id), fileName);
+    out = fs.createWriteStream(destPath);
+    let bytes = 0;
+    let tooBig = false;
+    done = new Promise((resolve, reject) => {
+      file.on('data', (chunk) => {
+        bytes += chunk.length;
+        if (bytes > cap && !tooBig) { // 캡 초과 — 스트림 파기, 부분 파일 삭제
+          tooBig = true;
+          file.destroy();
+          out.destroy();
+          fs.rm(destPath, { force: true }, () => {});
+          reject(new Error('file too large'));
+        }
+      });
+      out.on('finish', () => { if (!tooBig) resolve({ file: `outputs/books/${book.id}/${fileName}`, kind }); });
+      out.on('error', (e) => { if (!tooBig) reject(e); });
+    });
+    done.catch(() => {});
+    file.pipe(out);
+  });
+  bb.on('close', async () => {
+    if (res.headersSent) return;
+    if (!done) return res.status(400).json({ error: 'no file' });
+    try {
+      const { file, kind: k } = await done;
+      page[`${k}File`] = file;
+      page[`${k}Source`] = 'upload';
+      writeBooks(books);
+      res.json({ file, source: 'upload' });
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      if (msg === 'invalid kind') return res.status(400).json({ error: 'invalid kind' });
+      res.status(msg === 'file too large' ? 400 : 500).json({ error: msg });
+    }
+  });
+  bb.on('error', (err) => {
+    out?.destroy();
+    if (!res.headersSent) res.status(400).json({ error: String(err?.message ?? err) });
+  });
+  req.on('aborted', () => { out?.destroy(); bb.destroy(); });
+  req.pipe(bb);
+});
+
+// 스토리북 파이프라인 의존성 상태 (ComfyUI / Voicebox / ffmpeg / 모델)
+app.get('/api/storybook/status', async (req, res) => {
+  const ffmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
+  const models = fs.existsSync(
+    'C:/ComfyUI_windows_portable/ComfyUI/models/diffusion_models/krea2_turbo_fp8_scaled.safetensors',
+  );
+  res.json({
+    comfy: await comfy.isAlive(),
+    voicebox: await voicebox.isAlive(),
+    ffmpeg,
+    models,
+  });
+});
+
+// Voicebox TTS 백엔드 기동
+app.post('/api/voicebox/start', async (req, res) => {
+  if (await voicebox.isAlive()) return res.json({ started: false, reason: 'already running' });
+  spawn(
+    'C:\\projects\\voicebox\\backend\\venv\\Scripts\\python.exe',
+    ['-m', 'uvicorn', 'backend.main:app', '--port', '17493'],
+    { cwd: 'C:\\projects\\voicebox', detached: true, stdio: 'ignore' },
+  ).unref();
+  res.json({ started: true });
+});
 
 app.listen(PORT, () => console.log(`comfy-testbench: http://localhost:${PORT}`));
