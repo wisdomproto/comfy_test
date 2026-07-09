@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFluxT2I, buildWanI2V, LORA_TRIGGERS, WAN_NEGATIVE } from '../lib/workflows.mjs';
+import { buildFluxT2I, buildWanI2V, buildKrea2Illustration, LORA_TRIGGERS, WAN_NEGATIVE } from '../lib/workflows.mjs';
+
+const nodeByType = (g, t) => Object.values(g).find((n) => n.class_type === t);
+const idByType = (g, t) => Object.keys(g).find((id) => g[id].class_type === t);
 
 test('buildFluxT2I: 기본값으로 완전한 그래프 생성', () => {
   const g = buildFluxT2I({ prompt: 'a cat', seed: 42 });
@@ -58,6 +61,82 @@ test('buildWanI2V: 필수값 누락 시 throw', () => {
   assert.throws(() => buildWanI2V({ motionPrompt: 'x', seed: 1 }), /imageName/);
   assert.throws(() => buildWanI2V({ imageName: 'a.png', seed: 1 }), /motionPrompt/);
   assert.throws(() => buildWanI2V({ imageName: 'a.png', motionPrompt: 'x' }), /seed/);
+});
+
+test('buildKrea2Illustration: 기본값 base 그래프 (캐릭터 참조 없음)', () => {
+  const g = buildKrea2Illustration({ prompt: 'a bunny in a meadow', seed: 5 });
+  const unet = nodeByType(g, 'UNETLoader');
+  assert.equal(unet.inputs.unet_name, 'krea2_turbo_fp8_scaled.safetensors');
+  assert.equal(unet.inputs.weight_dtype, 'default');
+  const clip = nodeByType(g, 'CLIPLoader');
+  assert.equal(clip.inputs.clip_name, 'qwen3vl_4b_fp8_scaled.safetensors');
+  assert.equal(clip.inputs.type, 'krea2');
+  const vae = nodeByType(g, 'VAELoader');
+  assert.equal(vae.inputs.vae_name, 'qwen_image_vae.safetensors');
+  const latent = nodeByType(g, 'EmptyLatentImage');
+  assert.equal(latent.inputs.width, 1280);
+  assert.equal(latent.inputs.height, 704);
+  assert.equal(latent.inputs.batch_size, 1);
+  const ks = nodeByType(g, 'KSampler');
+  assert.equal(ks.inputs.seed, 5);
+  assert.equal(ks.inputs.steps, 8);
+  assert.equal(ks.inputs.cfg, 1);
+  assert.equal(ks.inputs.sampler_name, 'euler');
+  assert.equal(ks.inputs.scheduler, 'simple');
+  assert.equal(ks.inputs.denoise, 1);
+  assert.ok(nodeByType(g, 'ConditioningZeroOut'));
+  assert.equal(nodeByType(g, 'SaveImage').inputs.filename_prefix, 'storybook');
+  assert.equal(nodeByType(g, 'CLIPTextEncode').inputs.text, 'a bunny in a meadow');
+  // 캐릭터 참조 노드는 없어야 함
+  assert.equal(nodeByType(g, 'LoadImage'), undefined);
+  assert.equal(nodeByType(g, 'VAEEncode'), undefined);
+  assert.equal(nodeByType(g, 'Krea2EditModelPatch'), undefined);
+  assert.equal(nodeByType(g, 'Krea2EditGroundedEncode'), undefined);
+  assert.equal(nodeByType(g, 'LoraLoaderModelOnly'), undefined);
+});
+
+test('buildKrea2Illustration: characterRefName 지정 시 Krea2Edit 경로', () => {
+  const g = buildKrea2Illustration({ prompt: 'hero pose', characterRefName: 'char.png', seed: 3 });
+  const load = nodeByType(g, 'LoadImage');
+  assert.equal(load.inputs.image, 'char.png');
+  assert.ok(nodeByType(g, 'VAEEncode'));
+  const patchId = idByType(g, 'Krea2EditModelPatch');
+  assert.ok(patchId);
+  const grounded = nodeByType(g, 'Krea2EditGroundedEncode');
+  assert.equal(grounded.inputs.grounding_px, 768);
+  assert.equal(grounded.inputs.prompt, 'hero pose');
+  // KSampler 모델 입력이 Krea2EditModelPatch를 가리켜야 함
+  const ks = nodeByType(g, 'KSampler');
+  assert.equal(ks.inputs.model[0], patchId);
+  // 평범한 CLIPTextEncode positive는 없어야 함
+  assert.equal(nodeByType(g, 'CLIPTextEncode'), undefined);
+  // 네거티브는 여전히 ConditioningZeroOut
+  assert.ok(nodeByType(g, 'ConditioningZeroOut'));
+});
+
+test('buildKrea2Illustration: style LoRA 지정 시 LoraLoaderModelOnly 삽입', () => {
+  const g = buildKrea2Illustration({ prompt: 'a cat', style: 'krea2_kidsdrawing.safetensors', seed: 2 });
+  const lora = nodeByType(g, 'LoraLoaderModelOnly');
+  assert.equal(lora.inputs.lora_name, 'krea2_kidsdrawing.safetensors');
+  assert.equal(lora.inputs.strength_model, 1.0);
+});
+
+test('buildKrea2Illustration: style LoRA는 Krea2EditModelPatch 이전에 적용', () => {
+  const g = buildKrea2Illustration({
+    prompt: 'a cat', characterRefName: 'char.png', style: 'krea2_kidsdrawing.safetensors', seed: 2,
+  });
+  const unetId = idByType(g, 'UNETLoader');
+  const loraId = idByType(g, 'LoraLoaderModelOnly');
+  const patch = nodeByType(g, 'Krea2EditModelPatch');
+  // LoRA는 UNET을 입력받고, patch는 LoRA를 입력받음
+  assert.equal(g[loraId].inputs.model[0], unetId);
+  assert.equal(patch.inputs.model[0], loraId);
+});
+
+test('buildKrea2Illustration: prompt 없거나 seed 미확정이면 throw', () => {
+  assert.throws(() => buildKrea2Illustration({ seed: 1 }), /prompt/);
+  assert.throws(() => buildKrea2Illustration({ prompt: 'x' }), /seed/);
+  assert.throws(() => buildKrea2Illustration({ prompt: 'x', seed: 1.5 }), /seed/);
 });
 
 test('LORA_TRIGGERS: 설치된 LoRA 5종의 트리거 단어 맵', () => {
