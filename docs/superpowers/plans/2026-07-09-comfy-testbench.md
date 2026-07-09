@@ -895,7 +895,7 @@ $('#form-image').addEventListener('submit', async (e) => {
     });
     $('#image-result').innerHTML = '';
     watchJob(jobId);
-  } catch (err) { $('#image-result').innerHTML = `<div class="error">${err.message}</div>`; }
+  } catch (err) { $('#image-result').innerHTML = `<div class="error">${esc(err.message)}</div>`; }
 });
 
 // ---- 영상 생성 ----
@@ -966,7 +966,7 @@ $('#form-video').addEventListener('submit', async (e) => {
     });
     $('#video-result').innerHTML = '';
     watchJob(jobId);
-  } catch (err) { $('#video-result').innerHTML = `<div class="error">${err.message}</div>`; }
+  } catch (err) { $('#video-result').innerHTML = `<div class="error">${esc(err.message)}</div>`; }
 });
 
 // ---- 히스토리 ----
