@@ -20,7 +20,7 @@
 
 - **서버**: Node.js + Express (단일 `server.mjs`, 포트 3333)
 - **프론트**: vanilla JS + 단일 HTML — 빌드 과정 없음
-- **의존성 최소화**: express, ws (ComfyUI WebSocket 클라이언트용) 정도만
+- **의존성 최소화**: express, ws (ComfyUI WebSocket 클라이언트용), busboy (업로드 multipart 파싱)
 - ComfyUI API: `http://127.0.0.1:8188` (검증된 패턴은 `C:\ComfyUI_windows_portable\USAGE.md` 참고)
 
 ## 파일 구조
@@ -67,7 +67,8 @@ C:\projects\comfy_test\
 | `POST /api/comfy/start` | `run_nvidia_gpu_fast_fp16_accumulation.bat` spawn (detached) |
 | `POST /api/generate/image` | FLUX 워크플로우 생성·제출 → jobId 반환 |
 | `POST /api/generate/video` | Wan I2V 제출 (source: 히스토리 run id 또는 업로드 파일) → jobId |
-| `POST /api/upload` | 이미지 업로드 → ComfyUI input/ 복사 |
+| `POST /api/upload` | 이미지 업로드 → ComfyUI input/ 복사 (multipart 파싱은 busboy 사용) |
+| `GET /api/jobs` | 활성 잡 목록 — 페이지 새로고침 후에도 진행 중 잡 재발견 (영상 22분 대비) |
 | `GET /api/jobs/:id` | 잡 상태: queued / running(진행률 %) / done(결과 경로) / error |
 | `GET /api/runs` | runs.json 반환 |
 | `GET /outputs/*` | 결과물 정적 서빙 |
@@ -75,6 +76,14 @@ C:\projects\comfy_test\
 잡 매니저: 메모리 내 Map. 완료 시 결과 파일을 `outputs/`로 복사하고 runs.json에 append.
 실패도 에러 메시지와 함께 기록. 서버 재시작 시 진행 중이던 잡은 유실 허용(테스트 도구이므로),
 단 ComfyUI 쪽 히스토리로 결과 복구는 하지 않음 (YAGNI).
+
+추가 규칙:
+- **seed 확정 기록**: 랜덤 seed는 제출 *전에* 서버가 구체값으로 확정해 `params.seed`에 저장 —
+  "같은 설정으로 재생성"이 재현 가능해야 함
+- **히스토리 → 영상 소스**: source가 run id면 서버가 해당 `outputs/` 파일을
+  `uploadInput()`으로 ComfyUI `input/`에 복사한 뒤 워크플로우 구성
+- **LoRA 트리거 단어**: `/object_info`에는 없으므로 USAGE.md 기반의
+  파일명→트리거 하드코딩 맵을 서버에 둠
 
 ### 프론트 (public/)
 - **상단 바**: ComfyUI 연결 상태 배지. 끊김 → "ComfyUI 시작" 버튼
