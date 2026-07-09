@@ -15,7 +15,7 @@
 - **캐릭터 일관성:** **레퍼런스 이미지 기반(Krea 2 Identity Edit LoRA + `ComfyUI-Krea2Edit`)** — 학습 불필요. 캐릭터별 LoRA 학습은 향후 업그레이드로 문서화만.
 - **코드베이스:** 기존 `comfy_test` 리포 확장(신규 리포 아님).
 - **모델:** 필요한 모델은 셋업 스크립트가 자동 다운로드.
-- **콘텐츠 소스 = 생성 또는 업로드(에셋별 선택):** 페이지의 각 에셋(삽화 이미지 / 애니메이션 영상 / 내레이션 오디오)은 **생성(기본)** 또는 **사용자 업로드**를 개별 선택할 수 있다. 예: 삽화만 직접 그린 이미지를 올리고 애니메이션·내레이션은 생성, 또는 완성 영상만 올리고 내레이션은 생성 등. 합성 단계는 소스와 무관하게 동일하게 동작.
+- **콘텐츠 소스 = 생성 또는 업로드(에셋별 선택):** 페이지의 각 에셋(삽화 이미지 / 애니메이션 영상 / 내레이션 오디오)은 **생성(기본)** 또는 **사용자 업로드**를 개별 선택할 수 있다. 예: 삽화만 직접 그린 이미지를 올리고 애니메이션·내레이션은 생성, 또는 완성 영상만 올리고 내레이션은 생성 등. **오디오는 추가로 `none`(별도 내레이션 없이 영상 자체 오디오 사용/무음) 허용** — 완성 영상을 그대로 쓰는 경우를 위함.
 
 ## 실환경 (기동하여 확인)
 
@@ -47,7 +47,8 @@
 
 ### lib/workflows.mjs — 신규 빌더
 
-**`buildKrea2Illustration({ prompt, characterRefName, style, seed, width=1024, height=1024, steps=8 })`**
+**`buildKrea2Illustration({ prompt, characterRefName, style, seed, width=1280, height=704, steps=8 })`**
+- 기본 종횡비를 Wan 타깃(1280×704)에 맞춰 삽화→I2V 왜곡 방지. 정사각/세로 등은 옵션이되 book 단위로 삽화·영상 종횡비 일치 권장.
 - Krea 2 Turbo(distilled, ~8스텝) 기반 t2i. 노드: `UNETLoader`(`krea2_turbo_fp8_scaled.safetensors`), `CLIPLoader`(`qwen3vl_4b_fp8_scaled.safetensors`, Qwen3-VL 타입), `VAELoader`(`qwen_image_vae.safetensors`), `KSampler`, `VAEDecode`, `SaveImage`.
 - 캐릭터 일관성: `characterRefName` 지정 시 `Krea2Edit` 노드(`Krea2EditModelPatch`, `Krea2EditGroundedEncode`)로 레퍼런스 이미지를 latent + Qwen3-VL 인코더에 주입. `LoadImage`로 레퍼런스 로드.
 - style LoRA(예: `krea2_kidsdrawing`, `krea2_softwatercolor`) 선택 적용.
@@ -66,7 +67,9 @@
 - 한국어: `engine=qwen`, `language=ko`. 대괄호 감정태그 금지(qwen은 리터럴 처리).
 
 ### lib/compose.mjs — ffmpeg 래퍼
-- `muxPageClip(videoPath, audioPath, destPath)` — 영상+오디오 합성. **영상 길이를 오디오 길이에 맞춤**(내레이션이 길면 마지막 프레임 정지/루프, 짧으면 트림). `ffprobe`로 두 길이를 측정 후 오디오 기준으로 영상을 `tpad`/`loop`.
+- `muxPageClip(videoPath, audioPath|null, destPath)` — 영상+오디오 합성. 규칙:
+  - **오디오 있음(생성 또는 업로드) = 오디오 authoritative:** `ffprobe`로 두 길이 측정 후 **영상을 오디오 길이에 맞추고**(길면 `tpad`/freeze/loop, 짧으면 트림), 새 오디오 트랙으로 교체(업로드 영상의 기존 오디오는 대체됨).
+  - **오디오 `none`:** 영상을 그대로 사용(업로드 영상의 자체 오디오 유지, 생성 영상은 무음). 길이 변형 없음.
 - `concatClips(clipPaths[], destPath)` — 페이지 클립들을 순서대로 이어붙여 `final.mp4`.
 - ffmpeg 인자 구성은 **순수 함수로 분리해 단위테스트**(실제 ffmpeg 실행 없이 인자 문자열 검증). 실행은 스모크에서.
 - **`ffmpeg`·`ffprobe` 바이너리** 위치는 Phase 0에서 확인(시스템 PATH 또는 ComfyUI 포터블 번들). 없으면 셋업에서 안내/다운로드.
@@ -108,7 +111,8 @@ HuggingFace `resolve` URL에서 스트리밍 다운로드(재개/크기 검증) 
 - `POST /api/voicebox/start` — Voicebox 백엔드 헤드리스 기동(기존 comfy/start 패턴)
 - `GET/POST/PUT/DELETE /api/books`, `/api/books/:id` — book CRUD
 - `POST /api/books/:id/character` — 캐릭터 레퍼런스 이미지 업로드
-- `POST /api/books/:id/pages/:pid/upload` — 페이지 에셋 업로드(`kind`=`illustration|video|audio`, 파일). 해당 에셋 소스를 `upload`로 설정하고 파일 저장.
+- `POST /api/books/:id/pages/:pid/upload` — 페이지 에셋 업로드(`kind`=`illustration|video|audio`, 파일). **저장 위치 `outputs/books/<id>/`**(정적 서빙·compose 입력용), 해당 에셋 소스를 `upload`로 설정. **타입·크기 검증**(이미지/오디오 ~20MB, **영상은 별도 상향 예: ~500MB**). 업로드 삽화가 있고 애니메이션이 `generate`면 오케스트레이터가 그 삽화를 `input/`으로 hop.
+- `GET /api/books/:id/progress` — book 잡 진행 상태(아래 진행률 모델 shape) 조회. 프론트가 폴링.
 - `POST /api/books/:id/pages/:pid/generate` — 단일 페이지 파이프라인(소스가 `generate`인 에셋만 생성, `upload`는 건너뜀)
 - `POST /api/books/:id/generate` — 전체 book 생성(페이지 순회 + 합성)
 - 자산 서빙은 기존 정적 서빙 재사용.
@@ -125,7 +129,7 @@ HuggingFace `resolve` URL에서 스트리밍 다운로드(재개/크기 검증) 
     "id": "uuid", "text": "옛날 옛적에…",
     "illustrationPrompt": "...", "motionPrompt": "gentle wind…",
     "seed": 12345, "status": "done",
-    // 에셋별 소스: "generate" | "upload"
+    // 에셋별 소스: illustration/video = "generate"|"upload", audio = "generate"|"upload"|"none"
     "illustrationSource": "generate", "videoSource": "generate", "audioSource": "generate",
     "illustrationFile": "outputs/books/<id>/page-01.png",
     "videoFile": "...page-01.mp4", "audioFile": "...page-01.wav",
