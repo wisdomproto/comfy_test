@@ -163,24 +163,42 @@ app.post('/api/generate/video', async (req, res) => {
 });
 
 app.post('/api/upload', (req, res) => {
-  const bb = busboy({ headers: req.headers });
+  const bb = busboy({ headers: req.headers, limits: { fileSize: 20 * 1024 * 1024 } });
   let done = null; // 파일 flush 완료까지 기다렸다가 응답 (부분 쓰기 방지)
+  let out = null;
   bb.on('file', (name, file, info) => {
     const destName = `upload_${Date.now()}${path.extname(info.filename) || '.png'}`;
-    const out = fs.createWriteStream(path.join(comfy.COMFY_INPUT_DIR, destName));
+    const destPath = path.join(comfy.COMFY_INPUT_DIR, destName);
+    out = fs.createWriteStream(destPath);
     file.pipe(out);
     done = new Promise((resolve, reject) => {
+      file.on('limit', () => { // 20MB 초과 — 부분 파일 폐기
+        out.destroy();
+        fs.rm(destPath, { force: true }, () => {});
+        reject(new Error('file too large'));
+      });
       out.on('finish', () => resolve(destName));
       out.on('error', reject);
     });
+    done.catch(() => {}); // close 미도달 시 unhandled rejection 방지 (실제 처리는 close 핸들러)
   });
   bb.on('close', async () => {
+    if (res.headersSent) return;
     if (!done) return res.status(400).json({ error: 'no file' });
     try {
       res.json({ uploadName: await done });
     } catch (err) {
-      res.status(500).json({ error: String(err?.message ?? err) });
+      const msg = String(err?.message ?? err);
+      res.status(msg === 'file too large' ? 400 : 500).json({ error: msg });
     }
+  });
+  bb.on('error', (err) => {
+    out?.destroy();
+    if (!res.headersSent) res.status(400).json({ error: String(err?.message ?? err) });
+  });
+  req.on('aborted', () => { // 클라이언트 끊김 — 스트림 정리로 요청 방치 방지
+    out?.destroy();
+    bb.destroy();
   });
   req.pipe(bb);
 });
