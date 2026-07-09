@@ -7,6 +7,7 @@ import express from 'express';
 import busboy from 'busboy';
 import * as comfy from './lib/comfy.mjs';
 import { buildFluxT2I, buildWanI2V, LORA_TRIGGERS } from './lib/workflows.mjs';
+import { resolveSeed } from './lib/seed.mjs';
 
 const PORT = 3333;
 const ROOT = import.meta.dirname;
@@ -25,9 +26,6 @@ function appendRun(run) {
   fs.writeFileSync(RUNS_FILE, JSON.stringify(runs, null, 2));
 }
 
-// 랜덤 seed는 제출 전에 확정 — "같은 설정으로 재생성" 재현성 보장 (스펙)
-// crypto.randomInt는 max-min ≤ 2^48-1 제약 — 2**48이면 RangeError
-const resolveSeed = (seed) => (Number.isInteger(seed) ? seed : crypto.randomInt(0, 2 ** 48 - 1));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const jobs = new Map();
