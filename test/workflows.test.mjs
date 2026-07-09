@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFluxT2I, buildWanI2V, buildWan22I2V, buildKrea2Illustration, LORA_TRIGGERS, WAN_NEGATIVE } from '../lib/workflows.mjs';
+import { buildFluxT2I, buildWanI2V, buildWan22I2V, buildWan22I2V14B, buildKrea2Illustration, LORA_TRIGGERS, WAN_NEGATIVE } from '../lib/workflows.mjs';
 
 const nodeByType = (g, t) => Object.values(g).find((n) => n.class_type === t);
 const idByType = (g, t) => Object.keys(g).find((id) => g[id].class_type === t);
@@ -184,4 +184,45 @@ test('buildKrea2Illustration: prompt 없거나 seed 미확정이면 throw', () =
 test('LORA_TRIGGERS: 설치된 LoRA 5종의 트리거 단어 맵', () => {
   assert.equal(Object.keys(LORA_TRIGGERS).length, 5);
   assert.equal(LORA_TRIGGERS['plushy-world-flux_plushy_world_flux_araminta_k.safetensors'], 'plushy world');
+});
+
+test('buildWan22I2V14B: 14B GGUF two-expert + lightx2v + 1080 업스케일 기본', () => {
+  const g = buildWan22I2V14B({ imageName: 'src.png', motionPrompt: 'gentle motion', seed: 3 });
+  // GGUF 두 익스퍼트 + lightx2v LoRA + ModelSamplingSD3
+  const ggufs = Object.values(g).filter((n) => n.class_type === 'UnetLoaderGGUF');
+  assert.equal(ggufs.length, 2);
+  assert.ok(ggufs.some((n) => n.inputs.unet_name.includes('HighNoise')));
+  assert.ok(ggufs.some((n) => n.inputs.unet_name.includes('LowNoise')));
+  assert.equal(Object.values(g).filter((n) => n.class_type === 'LoraLoaderModelOnly').length, 2);
+  assert.equal(Object.values(g).filter((n) => n.class_type === 'ModelSamplingSD3').length, 2);
+  // 두 KSamplerAdvanced (2+2 스텝), cfg 1, euler/simple
+  const ks = Object.values(g).filter((n) => n.class_type === 'KSamplerAdvanced');
+  assert.equal(ks.length, 2);
+  assert.ok(ks.every((n) => n.inputs.steps === 4 && n.inputs.cfg === 1.0 && n.inputs.sampler_name === 'euler'));
+  // WanImageToVideo start_image, CLIPLoader wan, VAE wan_2.1
+  assert.equal(nodeByType(g, 'WanImageToVideo').inputs.start_image[0], idByType(g, 'LoadImage'));
+  assert.equal(nodeByType(g, 'CLIPLoader').inputs.type, 'wan');
+  assert.equal(nodeByType(g, 'VAELoader').inputs.vae_name, 'wan_2.1_vae.safetensors');
+  // 1080 업스케일: x4 모델 + ImageScale 1872x1080, CreateVideo가 업스케일 결과 사용
+  assert.equal(nodeByType(g, 'UpscaleModelLoader').inputs.model_name, 'RealESRGAN_x4.pth');
+  const scale = nodeByType(g, 'ImageScale');
+  assert.equal(scale.inputs.width, 1872);
+  assert.equal(scale.inputs.height, 1080);
+  assert.equal(nodeByType(g, 'CreateVideo').inputs.images[0], idByType(g, 'ImageScale'));
+});
+
+test('buildWan22I2V14B: upscale 옵션 none/2x', () => {
+  const none = buildWan22I2V14B({ imageName: 'a.png', motionPrompt: 'm', seed: 1, upscale: 'none' });
+  assert.equal(nodeByType(none, 'UpscaleModelLoader'), undefined);
+  assert.equal(nodeByType(none, 'CreateVideo').inputs.images[0], idByType(none, 'VAEDecode'));
+  const x2 = buildWan22I2V14B({ imageName: 'a.png', motionPrompt: 'm', seed: 1, upscale: '2x' });
+  assert.equal(nodeByType(x2, 'UpscaleModelLoader').inputs.model_name, 'RealESRGAN_x2.pth');
+  assert.equal(nodeByType(x2, 'ImageScale'), undefined);
+  assert.equal(nodeByType(x2, 'CreateVideo').inputs.images[0], idByType(x2, 'ImageUpscaleWithModel'));
+});
+
+test('buildWan22I2V14B: 필수값 누락 throw', () => {
+  assert.throws(() => buildWan22I2V14B({ motionPrompt: 'x', seed: 1 }), /imageName/);
+  assert.throws(() => buildWan22I2V14B({ imageName: 'a.png', seed: 1 }), /motionPrompt/);
+  assert.throws(() => buildWan22I2V14B({ imageName: 'a.png', motionPrompt: 'x' }), /seed/);
 });

@@ -20,6 +20,15 @@ const MANIFEST = [
   { repo: 'Comfy-Org/Wan_2.2_ComfyUI_Repackaged', file: 'split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors', folder: 'diffusion_models' },
   { repo: 'Comfy-Org/Wan_2.2_ComfyUI_Repackaged', file: 'split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors', folder: 'text_encoders' },
   { repo: 'Comfy-Org/Wan_2.2_ComfyUI_Repackaged', file: 'split_files/vae/wan2.2_vae.safetensors', folder: 'vae' },
+  // 프로덕션 영상: Wan 2.2 14B GGUF (two-expert) + lightx2v 4-step LoRA + RealESRGAN 업스케일.
+  // ⚠ 커스텀노드 필요: git clone https://github.com/city96/ComfyUI-GGUF → custom_nodes/ 후
+  //    python_embeded/python.exe -m pip install "gguf>=0.13.0"
+  { repo: 'QuantStack/Wan2.2-I2V-A14B-GGUF', file: 'HighNoise/Wan2.2-I2V-A14B-HighNoise-Q4_K_M.gguf', folder: 'diffusion_models' },
+  { repo: 'QuantStack/Wan2.2-I2V-A14B-GGUF', file: 'LowNoise/Wan2.2-I2V-A14B-LowNoise-Q4_K_M.gguf', folder: 'diffusion_models' },
+  { repo: 'Comfy-Org/Wan_2.2_ComfyUI_Repackaged', file: 'split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors', folder: 'loras' },
+  { repo: 'Comfy-Org/Wan_2.2_ComfyUI_Repackaged', file: 'split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors', folder: 'loras' },
+  { repo: 'ai-forever/Real-ESRGAN', file: 'RealESRGAN_x2.pth', folder: 'upscale_models' },
+  { repo: 'ai-forever/Real-ESRGAN', file: 'RealESRGAN_x4.pth', folder: 'upscale_models' },
 ].map((m) => ({ ...m, url: hfResolveUrl(m.repo, m.file), dest: dest(m.folder, m.file) }));
 
 const isDryRun = process.argv.includes('--dry-run') || process.env.DRY_RUN === '1';

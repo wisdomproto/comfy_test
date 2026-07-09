@@ -2,3 +2,4 @@ node_modules/
 outputs/
 data/runs.json
 .claude/settings.local.json
+data/books.json
