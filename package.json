@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test test/"
+    "test": "node --test test/**/*.test.mjs"
   },
   "dependencies": {
     "busboy": "^1.6.0",
